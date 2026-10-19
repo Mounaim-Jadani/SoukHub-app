@@ -1,0 +1,73 @@
+services:
+  mongo:
+    image: mongo:7.0.14
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: soukhub
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:v1.20.3
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8000
+      DB_URL: mongodb://mongo:27017/soukhub
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-soukhub-local-jwt-secret-change-me}
+      JWT_EXPIRES: ${JWT_EXPIRES:-7d}
+      ACTIVATION_SECRET: ${ACTIVATION_SECRET:-soukhub-local-activation-secret-change-me}
+      SMPT_HOST: ${SMPT_HOST:-mailpit}
+      SMPT_PORT: ${SMPT_PORT:-1025}
+      SMPT_SERVICE: ${SMPT_SERVICE:-}
+      SMPT_MAIL: ${SMPT_MAIL:-soukhub@local.test}
+      SMPT_PASSWORD: ${SMPT_PASSWORD:-}
+      SMPT_SECURE: ${SMPT_SECURE:-false}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    volumes:
+      - uploads_data:/app/uploads
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8000/health', res => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        REACT_APP_API_URL: http://localhost:8000/api/v2
+        REACT_APP_BACKEND_URL: http://localhost:8000/
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:80"
+
+volumes:
+  mongo_data:
+  uploads_data:
